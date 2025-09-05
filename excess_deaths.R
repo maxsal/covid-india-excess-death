@@ -10,7 +10,7 @@ data_path <- glue("{path}data/")
 raw_path <- glue("{data_path}raw/")
 fig_path <- glue("{path}figures/")
 
-# data
+# data -------------------------------------------------------------------------
 ## population
 ### read in population data by state/union territory from 2018-2021
 pop <- fread(glue("{raw_path}india_pop.csv"))
@@ -21,6 +21,10 @@ pop <- rbindlist(
     pop,
     data.table(
       sut = "Ladakh and Jammu & Kashmir",
+      p2014 = sum(pop[sut %in% c("Ladakh", "Jammu & Kashmir"), p2014]),
+      p2015 = sum(pop[sut %in% c("Ladakh", "Jammu & Kashmir"), p2015]),
+      p2016 = sum(pop[sut %in% c("Ladakh", "Jammu & Kashmir"), p2016]),
+      p2017 = sum(pop[sut %in% c("Ladakh", "Jammu & Kashmir"), p2017]),
       p2018 = sum(pop[sut %in% c("Ladakh", "Jammu & Kashmir"), p2018]),
       p2019 = sum(pop[sut %in% c("Ladakh", "Jammu & Kashmir"), p2019]),
       p2020 = sum(pop[sut %in% c("Ladakh", "Jammu & Kashmir"), p2020]),
@@ -37,16 +41,19 @@ covid20210101 <- fread(glue("{raw_path}covid20210101.csv"))[
   Country_Region == "India",
 ] |>
   clean_names()
-covid20211231 <- fread("{raw_path}covid20211231.csv")[
+
+covid20211231 <- fread(glue("{raw_path}covid20211231.csv"))[
   Country_Region == "India",
 ] |>
   clean_names()
+
 covid <- merge.data.table(
   covid20210101[, .(sut = province_state, covid20210101 = deaths)],
   covid20211231[, .(sut = province_state, covid20211231 = deaths)],
   by = "sut",
   all = TRUE
 )
+
 covid[, covid2021 := covid20211231 - covid20210101]
 covid <- covid[sut != "Unknown"]
 
@@ -88,18 +95,13 @@ covid <- rbindlist(
 crs <- fread(glue("{raw_path}india_registered_deaths.csv"), header = TRUE) |>
   clean_names()
 setnames(crs, "state_ut", "sut")
-years <- 2012:2021
+years <- 2014:2021
 for (y in years) {
   crs[[paste0("x", y)]] <- as.numeric(crs[[paste0("x", y)]])
+  setnames(crs, old = paste0("x", y), new = paste0("crs", y))
 }
-crs <- crs[, .(
-  sut,
-  type,
-  crs2018 = x2018,
-  crs2019 = x2019,
-  crs2020 = x2020,
-  crs2021 = x2021
-)]
+crs_vars <- c("sut", "type", paste0("crs", years))
+crs <- crs[, ..crs_vars]
 
 ## merge population, covid, and crs data
 merged <- Reduce(
@@ -109,32 +111,38 @@ merged <- Reduce(
 
 int_vars <- names(merged)[sapply(merged, is.integer)]
 merged[,
-  (int_vars) := lapply(.SD, function(x) as.integer(x)),
+  (int_vars) := lapply(.SD, function(x) as.numeric(x)),
   .SDcols = int_vars
 ]
 
-# calculate
+# calculate --------------------------------------------------------------------
 ## excess deaths
 ### estimate death rate: CRS deaths / population
-### estimated for 2019 and 2018, separately, and for 2018-2019 combined
+### estimated for 2019 and average for 2014-2019
 merged[, `:=`(
+  # death rate for 2019
   dr2019 = crs2019 / p2019,
-  dr2018 = crs2018 / p2018,
-  dr2018_2019 = (crs2018 + crs2019) / (p2018 + p2019)
+  # average of death rates from 2014-2019
+  dr2014_2019 = rowMeans(
+    mapply(
+      `/`,
+      .SD[, .(crs2014, crs2015, crs2016, crs2017, crs2018, crs2019)],
+      .SD[, .(p2014, p2015, p2016, p2017, p2018, p2019)]
+    ),
+    na.rm = TRUE
+  )
 )]
 
 ### estimate 2021 expected deaths: population * 2019 death rate
 merged[, `:=`(
   expected2021_2019 = p2021 * dr2019,
-  expected2021_2018 = p2021 * dr2018,
-  expected2021_2018_2019 = p2021 * dr2018_2019
+  expected2021_2014_2019 = p2021 * dr2014_2019
 )]
 
 ### estimate 2021 excess deaths: CRS deaths - expected deaths
 merged[, `:=`(
   excess2021_2019 = crs2021 - expected2021_2019,
-  excess2021_2018 = crs2021 - expected2021_2018,
-  excess2021_2018_2019 = crs2021 - expected2021_2018_2019
+  excess2021_2014_2019 = crs2021 - expected2021_2014_2019
 )]
 
 ### simple difference between 2021 and 2020
@@ -142,17 +150,14 @@ merged[, `:=`(
   excess2021 = crs2021 - crs2020
 )]
 
-
 ### estimate p-score
 merged[, `:=`(
   pscore2021 = (excess2021 / expected2021_2019),
   pscore2021_2019 = (excess2021_2019 / expected2021_2019),
-  pscore2021_2018 = (excess2021_2018 / expected2021_2018),
-  pscore2021_2018_2019 = (excess2021_2018_2019 / expected2021_2018_2019),
+  pscore2021_2014_2019 = (excess2021_2014_2019 / expected2021_2014_2019),
   ratio2021 = (excess2021 / covid2021),
   ratio2021_2019 = (excess2021_2019 / covid2021),
-  ratio2021_2018 = (excess2021_2018 / covid2021),
-  ratio2021_2018_2019 = (excess2021_2018_2019 / covid2021)
+  ratio2021_2014_2019 = (excess2021_2014_2019 / covid2021)
 )]
 
 india <- merged[sut == "India", ]
@@ -173,180 +178,7 @@ cat(
   "\n"
 )
 
-
 # plot -------------------------------------------------------------------------
-
-## excess vs covid
-cols <- c(
-  "Excess deaths" = "#138808",
-  "Covid deaths" = "#FF9933"
-)
-
-excess_v_covid_plot2021_2019 <- merged[, .(
-  sut,
-  `Excess deaths` = excess2021_2019,
-  `Covid deaths` = covid2021
-)] |>
-  melt(id.vars = "sut") |>
-  ggplot(aes(x = reorder(sut, -value), y = value, fill = variable)) +
-  geom_bar(stat = "identity", position = "dodge") +
-  scale_y_continuous(labels = scales::comma) +
-  scale_fill_manual(values = cols) +
-  labs(
-    title = "Excess deaths and reported COVID deaths in India, 2021",
-    x = "",
-    y = "Number of deaths",
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 90, hjust = 1),
-    legend.position = "top",
-    legend.title = element_blank(),
-    plot.title = element_text(hjust = 0, face = "bold"),
-    panel.grid.minor = element_blank(),
-    panel.grid.major.x = element_blank()
-  )
-
-excess_v_covid_plot2021 <- merged[, .(
-  sut,
-  `Excess deaths` = excess2021,
-  `Covid deaths` = covid2021
-)] |>
-  melt(id.vars = "sut") |>
-  ggplot(aes(x = reorder(sut, -value), y = value, fill = variable)) +
-  geom_bar(stat = "identity", position = "dodge") +
-  scale_y_continuous(labels = scales::comma) +
-  scale_fill_manual(values = cols) +
-  labs(
-    title = "Excess deaths and reported COVID deaths in India, 2021",
-    x = "",
-    y = "Number of deaths",
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 90, hjust = 1),
-    legend.position = "top",
-    legend.title = element_blank(),
-    plot.title = element_text(hjust = 0, face = "bold"),
-    panel.grid.minor = element_blank(),
-    panel.grid.major.x = element_blank()
-  )
-
-## ratio
-ratio_plot2021_2019 <- merged[, .(
-  sut,
-  `Excess deaths` = excess2021_2019,
-  `Covid deaths` = covid2021,
-  `Ratio` = excess2021_2019 / covid2021
-)] |>
-  ggplot(aes(x = reorder(sut, -`Ratio`), y = `Ratio`)) +
-  geom_bar(stat = "identity", fill = "#138808") +
-  geom_hline(yintercept = 1, linewidth = 1, color = "black") +
-  geom_hline(
-    yintercept = india[, ratio2021_2019],
-    linewidth = 1,
-    color = "#FF9933"
-  ) +
-  geom_label(
-    aes(y = 0, label = trimws(format(round(`Ratio`, 1), nsmall = 1))),
-    position = position_dodge(width = 0.9),
-    vjust = 0.5,
-    hjust = 0.5,
-    size = 4,
-    angle = 90,
-    color = "#138808",
-    fontface = "bold"
-  ) +
-  coord_cartesian(ylim = c(-5, 10)) +
-  scale_y_continuous(breaks = seq(-5, 10, 2.5)) +
-  labs(
-    title = "Ratio of excess deaths to reported COVID deaths in India, 2021",
-    subtitle = "Zoomed in on the y-axis",
-    x = "",
-    y = "Ratio",
-    caption = paste0(
-      "Note: Black line at 1 represents equal excess and COVID deaths. ",
-      "Orange line represents the national ratio of ",
-      round(india[, ratio2021_2019], 1),
-      ". "
-    )
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 90, hjust = 1),
-    legend.position = "top",
-    plot.title = element_text(hjust = 0, face = "bold"),
-    panel.grid.minor = element_blank(),
-    panel.grid.major.x = element_blank(),
-    plot.caption = element_text(hjust = 0)
-  )
-
-ratio_plot2021 <- merged[, .(
-  sut,
-  `Excess deaths` = excess2021,
-  `Covid deaths` = covid2021,
-  `Ratio` = excess2021 / covid2021
-)] |>
-  ggplot(aes(x = reorder(sut, -`Ratio`), y = `Ratio`)) +
-  geom_bar(stat = "identity", fill = "#138808") +
-  geom_hline(yintercept = 1, linewidth = 1, color = "black") +
-  geom_hline(
-    yintercept = india[, ratio2021_2019],
-    linewidth = 1,
-    color = "#FF9933"
-  ) +
-  geom_label(
-    aes(y = 0, label = trimws(format(round(`Ratio`, 1), nsmall = 1))),
-    position = position_dodge(width = 0.9),
-    vjust = 0.5,
-    hjust = 0.5,
-    size = 4,
-    angle = 90,
-    color = "#138808",
-    fontface = "bold"
-  ) +
-  coord_cartesian(ylim = c(-5, 10)) +
-  scale_y_continuous(breaks = seq(-5, 10, 2.5)) +
-  labs(
-    title = "Ratio of excess deaths to reported COVID deaths in India, 2021",
-    subtitle = "Zoomed in on the y-axis",
-    x = "",
-    y = "Ratio",
-    caption = paste0(
-      "Note: Black line at 1 represents equal excess and COVID deaths. ",
-      "Orange line represents the national ratio of ",
-      round(india[, ratio2021_2019], 1),
-      ". "
-    )
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 90, hjust = 1),
-    legend.position = "top",
-    plot.title = element_text(hjust = 0, face = "bold"),
-    panel.grid.minor = element_blank(),
-    panel.grid.major.x = element_blank(),
-    plot.caption = element_text(hjust = 0)
-  )
-
-# save plots
-ggsave(
-  filename = glue("{fig_path}excess_v_covid_plot.pdf"),
-  plot = excess_v_covid_plot2021_2019,
-  width = 10,
-  height = 6,
-  device = cairo_pdf
-)
-
-ggsave(
-  filename = glue("{fig_path}ratio_plot.pdf"),
-  plot = ratio_plot2021_2019,
-  width = 10,
-  height = 6,
-  device = cairo_pdf
-)
-
-# new plots --------------------------------------------------------------------
 # split by state vs. union territory
 # bin by ratio (>10, 5-10, 2-5, < 2)
 cols <- c(
@@ -356,8 +188,8 @@ cols <- c(
   "<=2" = "#138808"
 )
 
-merged[,
-  ratio2021_2019_cat := factor(
+merged[, `:=`(
+  ratio2021_2019_cat = factor(
     fcase(
       ratio2021_2019 >= 10,
       "10+",
@@ -369,10 +201,23 @@ merged[,
       "<=2"
     ),
     levels = c("<=2", "(2, 5)", "[5, 10)", "10+")
+  ),
+  ratio2021_2014_2019_cat = factor(
+    fcase(
+      ratio2021_2014_2019 >= 10,
+      "10+",
+      ratio2021_2014_2019 > 5,
+      "[5, 10)",
+      ratio2021_2014_2019 > 2,
+      "(2, 5)",
+      ratio2021_2014_2019 <= 2,
+      "<=2"
+    ),
+    levels = c("<=2", "(2, 5)", "[5, 10)", "10+")
   )
-]
-india[,
-  ratio2021_2019_cat := factor(
+)]
+india[, `:=`(
+  ratio2021_2019_cat = factor(
     fcase(
       ratio2021_2019 >= 10,
       "10+",
@@ -384,20 +229,36 @@ india[,
       "<=2"
     ),
     levels = c("<=2", "(2, 5)", "[5, 10)", "10+")
+  ),
+  ratio2021_2014_2019_cat = factor(
+    fcase(
+      ratio2021_2014_2019 >= 10,
+      "10+",
+      ratio2021_2014_2019 > 5,
+      "[5, 10)",
+      ratio2021_2014_2019 > 2,
+      "(2, 5)",
+      ratio2021_2014_2019 <= 2,
+      "<=2"
+    ),
+    levels = c("<=2", "(2, 5)", "[5, 10)", "10+")
   )
-]
+)]
 
 indias <- india |>
-  ggplot(aes(x = reorder(sut, -ratio2021_2019), y = ratio2021_2019)) +
-  geom_col(aes(fill = ratio2021_2019_cat), width = 0.8) +
+  ggplot(aes(x = reorder(sut, -ratio2021_2014_2019), y = ratio2021_2014_2019)) +
+  geom_col(aes(fill = ratio2021_2014_2019_cat), width = 0.8) +
   geom_hline(yintercept = 1, linewidth = 1, color = "black") +
   geom_hline(
-    yintercept = india[, ratio2021_2019],
+    yintercept = india[, ratio2021_2014_2019],
     linewidth = 1,
     color = "#FF9933"
   ) +
   geom_label(
-    aes(y = 0, label = trimws(format(round(ratio2021_2019, 1), nsmall = 1))),
+    aes(
+      y = 0,
+      label = trimws(format(round(ratio2021_2014_2019, 1), nsmall = 1))
+    ),
     position = position_dodge(width = 0.9),
     vjust = 0.5,
     hjust = 0.5,
@@ -406,8 +267,11 @@ indias <- india |>
     color = "black",
     fontface = "bold"
   ) +
-  coord_cartesian(ylim = c(-5, 10)) +
-  scale_y_continuous(breaks = seq(-5, 10, 2.5)) +
+  coord_cartesian(ylim = c(0, 10)) +
+  scale_y_continuous(
+    breaks = seq(0, 10, 2),
+    expand = expansion(mult = c(0.1, 0))
+  ) +
   scale_fill_manual(values = cols) +
   labs(
     title = "Ratio of excess deaths to reported COVID deaths in India, 2021",
@@ -417,13 +281,13 @@ indias <- india |>
     caption = paste0(
       "Note: Black line at 1 represents equal excess and COVID deaths. ",
       "Orange line represents the national ratio of ",
-      round(india[, ratio2021_2019], 1),
+      round(india[, ratio2021_2014_2019], 1),
       ". "
     )
   ) +
   theme_minimal() +
   theme(
-    axis.text.x = element_text(angle = 90, hjust = 1),
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
     legend.position = "top",
     plot.title = element_text(hjust = 0, face = "bold"),
     panel.grid.minor = element_blank(),
@@ -433,16 +297,19 @@ indias <- india |>
   )
 
 states <- merged[type == "State" & covid2021 >= 500] |>
-  ggplot(aes(x = reorder(sut, -ratio2021_2019), y = ratio2021_2019)) +
-  geom_col(aes(fill = ratio2021_2019_cat), width = 0.8) +
+  ggplot(aes(x = reorder(sut, -ratio2021_2014_2019), y = ratio2021_2014_2019)) +
+  geom_col(aes(fill = ratio2021_2014_2019_cat), width = 0.8) +
   geom_hline(yintercept = 1, linewidth = 1, color = "black") +
   geom_hline(
-    yintercept = india[, ratio2021_2019],
+    yintercept = india[, ratio2021_2014_2019],
     linewidth = 1,
     color = "#FF9933"
   ) +
   geom_label(
-    aes(y = 0, label = trimws(format(round(ratio2021_2019, 1), nsmall = 1))),
+    aes(
+      y = 0,
+      label = trimws(format(round(ratio2021_2014_2019, 1), nsmall = 1))
+    ),
     position = position_dodge(width = 0.9),
     vjust = 0.5,
     hjust = 0.5,
@@ -451,8 +318,11 @@ states <- merged[type == "State" & covid2021 >= 500] |>
     color = "black",
     fontface = "bold"
   ) +
-  coord_cartesian(ylim = c(-5, 10)) +
-  scale_y_continuous(breaks = seq(-5, 10, 2.5)) +
+  coord_cartesian(ylim = c(0, 10)) +
+  scale_y_continuous(
+    breaks = seq(0, 10, 2),
+    expand = expansion(mult = c(0.1, 0))
+  ) +
   scale_fill_manual(values = cols) +
   labs(
     title = "Ratio of excess deaths to reported COVID deaths in India, 2021",
@@ -462,13 +332,13 @@ states <- merged[type == "State" & covid2021 >= 500] |>
     caption = paste0(
       "Note: Black line at 1 represents equal excess and COVID deaths. ",
       "Orange line represents the national ratio of ",
-      round(india[, ratio2021_2019], 1),
+      round(india[, ratio2021_2014_2019], 1),
       ". "
     )
   ) +
   theme_minimal() +
   theme(
-    axis.text.x = element_text(angle = 90, hjust = 1),
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
     legend.position = "top",
     plot.title = element_text(hjust = 0, face = "bold"),
     panel.grid.minor = element_blank(),
@@ -478,16 +348,19 @@ states <- merged[type == "State" & covid2021 >= 500] |>
   )
 
 uts <- merged[type == "Union Territory" & covid2021 >= 500] |>
-  ggplot(aes(x = reorder(sut, -ratio2021_2019), y = ratio2021_2019)) +
-  geom_col(aes(fill = ratio2021_2019_cat), width = 0.8) +
+  ggplot(aes(x = reorder(sut, -ratio2021_2014_2019), y = ratio2021_2014_2019)) +
+  geom_col(aes(fill = ratio2021_2014_2019_cat), width = 0.8) +
   geom_hline(yintercept = 1, linewidth = 1, color = "black") +
   geom_hline(
-    yintercept = india[, ratio2021_2019],
+    yintercept = india[, ratio2021_2014_2019],
     linewidth = 1,
     color = "#FF9933"
   ) +
   geom_label(
-    aes(y = 0, label = trimws(format(round(ratio2021_2019, 1), nsmall = 1))),
+    aes(
+      y = 0,
+      label = trimws(format(round(ratio2021_2014_2019, 1), nsmall = 1))
+    ),
     position = position_dodge(width = 0.9),
     vjust = 0.5,
     hjust = 0.5,
@@ -496,8 +369,11 @@ uts <- merged[type == "Union Territory" & covid2021 >= 500] |>
     color = "black",
     fontface = "bold"
   ) +
-  coord_cartesian(ylim = c(-5, 10)) +
-  scale_y_continuous(breaks = seq(-5, 10, 2.5)) +
+  coord_cartesian(ylim = c(0, 10)) +
+  scale_y_continuous(
+    breaks = seq(0, 10, 2),
+    expand = expansion(mult = c(0.1, 0))
+  ) +
   scale_fill_manual(values = cols) +
   labs(
     title = "Ratio of excess deaths to reported COVID deaths in India, 2021",
@@ -507,13 +383,13 @@ uts <- merged[type == "Union Territory" & covid2021 >= 500] |>
     caption = paste0(
       "Note: Black line at 1 represents equal excess and COVID deaths. ",
       "Orange line represents the national ratio of ",
-      round(india[, ratio2021_2019], 1),
+      round(india[, ratio2021_2014_2019], 1),
       ". "
     )
   ) +
   theme_minimal() +
   theme(
-    axis.text.x = element_text(angle = 90, hjust = 1),
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
     legend.position = "top",
     plot.title = element_text(hjust = 0, face = "bold"),
     panel.grid.minor = element_blank(),
@@ -602,7 +478,7 @@ deaths_plot <- deaths[year != 2012, ] |>
   scale_y_continuous(
     labels = scales::comma,
     breaks = seq(0, 2500000, 500000),
-    limits = c(0, 2500000),
+    limits = c(0, 2500000)
   ) +
   scale_x_continuous(breaks = seq(2012, 2021, 1)) +
   labs(
@@ -622,25 +498,25 @@ deaths_plot <- deaths[year != 2012, ] |>
     axis.title.y = element_text()
   )
 ggsave(
-  plot = last_plot(),
+  plot = deaths_plot,
   filename = glue("{fig_path}excess_deaths.png"),
   width = 6,
   height = 4,
   dpi = 320
 )
 
-deaths_plot / edr_plot
+(deaths_over_edr_plot <- deaths_plot / edr_plot)
 ggsave(
-  filename = glue("{fig_path}excess_deaths_ratio_plot2021_2019.pdf"),
-  plot = last_plot(),
+  filename = glue("{fig_path}excess_deaths_ratio_plot2021_2014_2019.pdf"),
+  plot = deaths_over_edr_plot,
   width = 10,
   height = 10,
   device = cairo_pdf
 )
 
 ggsave(
-  filename = glue("{fig_path}excess_deaths_ratio_plot2021_2019.tiff"),
-  plot = last_plot(),
+  filename = glue("{fig_path}excess_deaths_ratio_plot2021_2014_2019.tiff"),
+  plot = deaths_over_edr_plot,
   width = 10,
   height = 10,
   units = "in",
@@ -653,7 +529,7 @@ cols_dt <- unique(cord[, .(Source, color)])
 cols <- cols_dt[, color]
 names(cols) <- cols_dt[, Source]
 
-cord |>
+completeness_plot <- cord |>
   ggplot(aes(x = year, y = cord, group = Source, color = Source)) +
   geom_rect(
     aes(xmin = 2020.25, xmax = 2021.5, ymin = -Inf, ymax = Inf),
@@ -680,12 +556,13 @@ cord |>
     axis.title.y = element_text()
     # legend.title = element_blank()
   )
+completeness_plot
 ggsave(
-  plot = last_plot(),
-  filename = glue("{fig_path}cord.png"),
+  plot = completeness_plot,
+  filename = glue("{fig_path}cord.pdf"),
   width = 6,
   height = 4,
-  dpi = 320
+  device = cairo_pdf
 )
 
 #####
