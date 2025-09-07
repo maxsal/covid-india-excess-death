@@ -1,1 +1,3 @@
-# covid-india-excess-death
+# India's True Death Toll in 2021 during the COVID-19 Pandemic: Insights from Delayed Official Civil Registration Data
+
+This repository accompanies the commentary piece of the same name by [Maxwell Salvatore](https://dbei.med.upenn.edu/staff/maxwell-salvatore-mph-phd/), [Brian Wahl](https://ysph.yale.edu/profile/brian-wahl/), and [Bhramar Mukherjee](https://ysph.yale.edu/profile/bhramar-mukherjee/).
