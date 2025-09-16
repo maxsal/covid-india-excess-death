@@ -13,7 +13,7 @@ fig_path <- glue("{path}figures/")
 # data -------------------------------------------------------------------------
 ## population
 ### read in population data by state/union territory from 2018-2021
-pop <- fread(glue("{raw_path}india_pop.csv"))
+pop <- fread(glue("{raw_path}population/india_pop_july_table11.csv"))
 
 ### create a combined Ladakh and Jammu & Kashmir entry to align with Covid data
 pop <- rbindlist(
@@ -37,12 +37,12 @@ pop <- rbindlist(
 
 ## reported covid deaths
 ### pulled from JHU CSSE GitHub (see `pull_jhu_covid_data.R`)
-covid20210101 <- fread(glue("{raw_path}covid20210101.csv"))[
+covid20210101 <- fread(glue("{raw_path}covid/covid20210101.csv"))[
   Country_Region == "India",
 ] |>
   clean_names()
 
-covid20211231 <- fread(glue("{raw_path}covid20211231.csv"))[
+covid20211231 <- fread(glue("{raw_path}covid/covid20211231.csv"))[
   Country_Region == "India",
 ] |>
   clean_names()
@@ -92,7 +92,7 @@ covid <- rbindlist(
 ## CRS deaths
 ### CRS deaths data from Table 5 in 2025 report on 2021 CRS data
 ### url:
-crs <- fread(glue("{raw_path}india_registered_deaths.csv"), header = TRUE) |>
+crs <- fread(glue("{raw_path}death/india_registered_deaths.csv"), header = TRUE) |>
   clean_names()
 setnames(crs, "state_ut", "sut")
 years <- 2014:2021
@@ -178,9 +178,9 @@ cat(
   "\n"
 )
 
-# plot -------------------------------------------------------------------------
-# split by state vs. union territory
-# bin by ratio (>10, 5-10, 2-5, < 2)
+# edr plot ---------------------------------------------------------------------
+## split by state vs. union territory
+## bin by ratio (>10, 5-10, 2-5, < 2)
 cols <- c(
   "10+" = "#D55E00",
   "[5, 10)" = "#FF9933",
@@ -437,7 +437,7 @@ edr_plot <- wrap_plots(
     )
   )
 
-####
+# deaths plot ------------------------------------------------------------------
 deaths <- data.table(
   year = 2012:2021,
   death_reg = c(
@@ -455,14 +455,33 @@ deaths <- data.table(
 )
 deaths[, excess := death_reg - shift(death_reg, 1)]
 deaths[, excess_pct := (excess / shift(death_reg, 1))]
-deaths
 
-coef <- 2500000 / .30
+india_year_vars <- paste0("p", 2014:2021)
 
-deaths_plot <- deaths[year != 2012, ] |>
+deaths <- merge.data.table(
+  deaths,
+  melt(
+    india[, india_year_vars, with = FALSE],
+    measure.vars = india_year_vars,
+    variable.name = "year",
+    value.name = "population"
+  )[, year := as.integer(gsub("p", "", year))][],
+  by = "year"
+)[, death_rate_1k := (death_reg * 1000 / population)][]
+
+coef <- 2500000 / 10
+
+deaths_plot <- deaths[year >= 2014, ] |>
   ggplot(aes(x = year, y = excess)) +
   geom_col(fill = "#138808") +
-  geom_text(
+  # geom_line(aes(y = excess_pct * coef), linewidth = 1, color = "#FF9933") +
+  # geom_hline(yintercept = 0, linewidth = 1, color = "black") +
+  geom_line(
+    aes(x = year, y = death_rate_1k * coef),
+    color = "#000080",
+    linewidth = 1
+  ) +
+  geom_label(
     aes(
       x = year,
       y = excess,
@@ -471,14 +490,20 @@ deaths_plot <- deaths[year != 2012, ] |>
     hjust = 0.5,
     vjust = -0.3,
     color = "#FF9933",
+    fill = "white",
+    alpha = 0.5,
+    label.size = NA,
     fontface = "bold"
   ) +
-  # geom_line(aes(y = excess_pct * coef), linewidth = 1, color = "#FF9933") +
-  # geom_hline(yintercept = 0, linewidth = 1, color = "black") +
   scale_y_continuous(
     labels = scales::comma,
     breaks = seq(0, 2500000, 500000),
-    limits = c(0, 2500000)
+    limits = c(0, 2500000),
+    sec.axis = sec_axis(
+      ~ . / coef,
+      name = "Death rate (per 1,000 population)",
+      breaks = seq(0, 10, 2)
+    )
   ) +
   scale_x_continuous(breaks = seq(2012, 2021, 1)) +
   labs(
@@ -495,8 +520,11 @@ deaths_plot <- deaths[year != 2012, ] |>
     panel.grid.minor = element_blank(),
     panel.grid.major.x = element_blank(),
     plot.caption = element_text(hjust = 0),
-    axis.title.y = element_text()
+    axis.title.y = element_text(),
+    axis.title.y.left = element_text(color = "#138808"),
+    axis.title.y.right = element_text(color = "#000080")
   )
+deaths_plot
 ggsave(
   plot = deaths_plot,
   filename = glue("{fig_path}excess_deaths.png"),
@@ -505,6 +533,7 @@ ggsave(
   dpi = 320
 )
 
+# combined plot ----------------------------------------------------------------
 (deaths_over_edr_plot <- deaths_plot / edr_plot)
 ggsave(
   filename = glue("{fig_path}excess_deaths_ratio_plot2021_2014_2019.pdf"),
@@ -514,17 +543,8 @@ ggsave(
   device = cairo_pdf
 )
 
-ggsave(
-  filename = glue("{fig_path}excess_deaths_ratio_plot2021_2014_2019.tiff"),
-  plot = deaths_over_edr_plot,
-  width = 10,
-  height = 10,
-  units = "in",
-  dpi = 600
-)
-
-# load coordinates data for India states and union territories
-cord <- fread(glue("{raw_path}india_cord.csv"))
+# completeness of death record plot --------------------------------------------
+cord <- fread(glue("{raw_path}completeness/india_cord.csv"))
 cols_dt <- unique(cord[, .(Source, color)])
 cols <- cols_dt[, color]
 names(cols) <- cols_dt[, Source]
@@ -564,115 +584,3 @@ ggsave(
   height = 4,
   device = cairo_pdf
 )
-
-#####
-dt2019 <- fread("~/Downloads/india_mortality_2019_csv.txt")
-
-younger <- c(
-  "Less than 1 Year",
-  "1 Year - 4 Year",
-  "5 Year - 14 Year",
-  "15 Year - 24 Year",
-  "25 Year - 34 Year",
-  "35 Year - 44 Year",
-  "45 Year - 54 Year",
-  "55 Year - 64 Year"
-)
-older <- c("65 Year - 69 Year", "70 Year & above")
-
-dt2019[Age_Group %in% younger, sum(Total_Deaths_2019)]
-dt2019[Age_Group %in% older, sum(Total_Deaths_2019)]
-
-death <- fread(glue("{raw_path}annual-deaths-by-age.csv"))
-
-death2019 <- death[Entity == "India" & Year == 2019, ] |>
-  melt(
-    id.vars = c("Entity", "Code", "Year")
-  )
-
-death2021 <- death[Entity == "India" & Year == 2021, ] |>
-  melt(
-    id.vars = c("Entity", "Code", "Year")
-  )
-
-younger <- c(
-  "Deaths - Sex: all - Age: 0-4 - Variant: estimates",
-  "Deaths - Sex: all - Age: 5-9 - Variant: estimates",
-  "Deaths - Sex: all - Age: 10-14 - Variant: estimates",
-  "Deaths - Sex: all - Age: 15-19 - Variant: estimates",
-  "Deaths - Sex: all - Age: 20-24 - Variant: estimates",
-  "Deaths - Sex: all - Age: 25-29 - Variant: estimates",
-  "Deaths - Sex: all - Age: 30-34 - Variant: estimates",
-  "Deaths - Sex: all - Age: 35-39 - Variant: estimates",
-  "Deaths - Sex: all - Age: 40-44 - Variant: estimates",
-  "Deaths - Sex: all - Age: 45-49 - Variant: estimate",
-  "Deaths - Sex: all - Age: 50-54 - Variant: estimates",
-  "Deaths - Sex: all - Age: 55-59 - Variant: estimates",
-  "Deaths - Sex: all - Age: 60-64 - Variant: estimates"
-)
-older <- setdiff(death2019[, unique(variable)], younger)
-
-death2019[,
-  age_cat := fcase(
-    variable %in% younger,
-    "[0, 65)",
-    variable %in% older,
-    "[65+)"
-  )
-]
-death2021[,
-  age_cat := fcase(
-    variable %in% younger,
-    "[0, 65)",
-    variable %in% older,
-    "[65+)"
-  )
-]
-
-
-death2019[, .(deaths = sum(value)), age_cat]
-death2021[, .(deaths = sum(value)), age_cat]
-
-###
-pop <- fread(glue("{raw_path}population-by-age-group-with-projections.csv"))
-
-change_vars <- names(pop)[!names(pop) %in% c("Entity", "Code", "Year")]
-
-pop[, (change_vars) := lapply(.SD, function(x) x / 1), .SDcols = change_vars]
-
-pop2019 <- pop[Entity == "India" & Year == 2019, ] |>
-  melt(
-    id.vars = c("Entity", "Code", "Year")
-  )
-pop2021 <- pop[Entity == "India" & Year == 2021, ] |>
-  melt(
-    id.vars = c("Entity", "Code", "Year")
-  )
-
-youngPop <- c(
-  "Population - Sex: all - Age: 25-64 - Variant: estimates",
-  "Population - Sex: all - Age: 0-24 - Variant: estimates"
-)
-oldPop <- c(
-  "Population - Sex: all - Age: 65+ - Variant: estimates"
-)
-
-pop2019[,
-  age_cat := fcase(
-    variable %in% youngPop,
-    "[0, 65)",
-    variable %in% oldPop,
-    "[65+)"
-  )
-]
-pop2021[,
-  age_cat := fcase(
-    variable %in% youngPop,
-    "[0, 65)",
-    variable %in% oldPop,
-    "[65+)"
-  )
-]
-
-pop2019[, sum(value), age_cat]
-pop2021[, sum(value), age_cat]
