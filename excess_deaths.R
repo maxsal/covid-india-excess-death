@@ -92,7 +92,10 @@ covid <- rbindlist(
 ## CRS deaths
 ### CRS deaths data from Table 5 in 2025 report on 2021 CRS data
 ### url:
-crs <- fread(glue("{raw_path}death/india_registered_deaths.csv"), header = TRUE) |>
+crs <- fread(
+  glue("{raw_path}death/india_registered_deaths.csv"),
+  header = TRUE
+) |>
   clean_names()
 setnames(crs, "state_ut", "sut")
 years <- 2014:2021
@@ -245,6 +248,9 @@ india[, `:=`(
   )
 )]
 
+y_trunc <- 30
+y_break <- 5
+
 indias <- india |>
   ggplot(aes(x = reorder(sut, -ratio2021_2014_2019), y = ratio2021_2014_2019)) +
   geom_col(aes(fill = ratio2021_2014_2019_cat), width = 0.8) +
@@ -267,9 +273,9 @@ indias <- india |>
     color = "black",
     fontface = "bold"
   ) +
-  coord_cartesian(ylim = c(0, 10)) +
+  coord_cartesian(ylim = c(0, y_trunc)) +
   scale_y_continuous(
-    breaks = seq(0, 10, 2),
+    breaks = seq(0, y_trunc, y_break),
     expand = expansion(mult = c(0.1, 0))
   ) +
   scale_fill_manual(values = cols) +
@@ -318,9 +324,9 @@ states <- merged[type == "State" & covid2021 >= 500] |>
     color = "black",
     fontface = "bold"
   ) +
-  coord_cartesian(ylim = c(0, 10)) +
+  coord_cartesian(ylim = c(0, y_trunc)) +
   scale_y_continuous(
-    breaks = seq(0, 10, 2),
+    breaks = seq(0, y_trunc, y_break),
     expand = expansion(mult = c(0.1, 0))
   ) +
   scale_fill_manual(values = cols) +
@@ -369,9 +375,9 @@ uts <- merged[type == "Union Territory" & covid2021 >= 500] |>
     color = "black",
     fontface = "bold"
   ) +
-  coord_cartesian(ylim = c(0, 10)) +
+  coord_cartesian(ylim = c(0, y_trunc)) +
   scale_y_continuous(
-    breaks = seq(0, 10, 2),
+    breaks = seq(0, y_trunc, y_break),
     expand = expansion(mult = c(0.1, 0))
   ) +
   scale_fill_manual(values = cols) +
@@ -418,6 +424,233 @@ edr_plot <- wrap_plots(
       legend.position = "top"
     ),
   uts +
+    labs(title = "", x = "Union territories", subtitle = "", caption = "") +
+    theme(
+      axis.text.y = element_blank(),
+      axis.title.y = element_blank(),
+      legend.position = "none"
+    ),
+  # design = dsn,
+  widths = c(1, 25, 4)
+) +
+  plot_annotation(
+    # title = "Ratio of excess deaths to reported COVID deaths in India, 2021",
+    # caption = "Zoomed in on the y-axis [0, 10).",
+    theme = theme(
+      legend.position = "none",
+      plot.title = element_text(hjust = 0, face = "bold"),
+      plot.caption = element_text(hjust = 0, color = "gray30")
+    )
+  )
+
+### edr based on 2019 only
+indias2019 <- india |>
+  ggplot(aes(x = reorder(sut, -ratio2021_2019), y = ratio2021_2019)) +
+  geom_col(aes(fill = ratio2021_2019_cat), width = 0.8) +
+  geom_hline(yintercept = 1, linewidth = 1, color = "black") +
+  geom_hline(
+    yintercept = india[, ratio2021_2019],
+    linewidth = 1,
+    color = "#FF9933"
+  ) +
+  geom_label(
+    aes(
+      y = 0,
+      label = trimws(format(round(ratio2021_2019, 1), nsmall = 1))
+    ),
+    position = position_dodge(width = 0.9),
+    vjust = 0.5,
+    hjust = 0.5,
+    size = 3,
+    angle = 90,
+    color = "black",
+    fontface = "bold"
+  ) +
+  coord_cartesian(ylim = c(0, y_trunc)) +
+  scale_y_continuous(
+    breaks = seq(0, y_trunc, y_break),
+    expand = expansion(mult = c(0.1, 0))
+  ) +
+  scale_fill_manual(values = cols) +
+  labs(
+    title = "Ratio of excess deaths to reported COVID deaths in India, 2021",
+    subtitle = "Zoomed in on the y-axis",
+    x = "",
+    y = "Excess death ratio",
+    caption = paste0(
+      "Note: Black line at 1 represents equal excess and COVID deaths. ",
+      "Orange line represents the national ratio of ",
+      round(india[, ratio2021_2019], 1),
+      ". "
+    )
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    legend.position = "top",
+    plot.title = element_text(hjust = 0, face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.caption = element_text(hjust = 0),
+    legend.title = element_blank()
+  )
+
+states2019 <- merged[type == "State" & covid2021 >= 500] |>
+  ggplot(aes(x = reorder(sut, -ratio2021_2019), y = ratio2021_2019)) +
+  geom_col(aes(fill = ratio2021_2019_cat), width = 0.8) +
+  geom_hline(yintercept = 1, linewidth = 1, color = "black") +
+  geom_hline(
+    yintercept = india[, ratio2021_2019],
+    linewidth = 1,
+    color = "#FF9933"
+  ) +
+  geom_label(
+    aes(
+      y = 0,
+      label = trimws(format(round(ratio2021_2019, 1), nsmall = 1))
+    ),
+    position = position_dodge(width = 0.9),
+    vjust = 0.5,
+    hjust = 0.5,
+    size = 3,
+    angle = 90,
+    color = "black",
+    fontface = "bold"
+  ) +
+  coord_cartesian(ylim = c(0, y_trunc)) +
+  scale_y_continuous(
+    breaks = seq(0, y_trunc, y_break),
+    expand = expansion(mult = c(0.1, 0))
+  ) +
+  scale_fill_manual(values = cols) +
+  labs(
+    title = "Ratio of excess deaths to reported COVID deaths in India, 2021",
+    subtitle = "Zoomed in on the y-axis",
+    x = "",
+    y = "Ratio",
+    caption = paste0(
+      "Note: Black line at 1 represents equal excess and COVID deaths. ",
+      "Orange line represents the national ratio of ",
+      round(india[, ratio2021_2019], 1),
+      ". "
+    )
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    legend.position = "top",
+    plot.title = element_text(hjust = 0, face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.caption = element_text(hjust = 0),
+    legend.title = element_blank()
+  )
+
+uts2019 <- merged[type == "Union Territory" & covid2021 >= 500] |>
+  ggplot(aes(x = reorder(sut, -ratio2021_2019), y = ratio2021_2019)) +
+  geom_col(aes(fill = ratio2021_2019_cat), width = 0.8) +
+  geom_hline(yintercept = 1, linewidth = 1, color = "black") +
+  geom_hline(
+    yintercept = india[, ratio2021_2019],
+    linewidth = 1,
+    color = "#FF9933"
+  ) +
+  geom_label(
+    aes(
+      y = 0,
+      label = trimws(format(round(ratio2021_2019, 1), nsmall = 1))
+    ),
+    position = position_dodge(width = 0.9),
+    vjust = 0.5,
+    hjust = 0.5,
+    size = 3,
+    angle = 90,
+    color = "black",
+    fontface = "bold"
+  ) +
+  coord_cartesian(ylim = c(0, y_trunc)) +
+  scale_y_continuous(
+    breaks = seq(0, y_trunc, y_break),
+    expand = expansion(mult = c(0.1, 0))
+  ) +
+  scale_fill_manual(values = cols) +
+  labs(
+    title = "Ratio of excess deaths to reported COVID deaths in India, 2021",
+    subtitle = "Zoomed in on the y-axis",
+    x = "",
+    y = "Ratio",
+    caption = paste0(
+      "Note: Black line at 1 represents equal excess and COVID deaths. ",
+      "Orange line represents the national ratio of ",
+      round(india[, ratio2021_2019], 1),
+      ". "
+    )
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    legend.position = "top",
+    plot.title = element_text(hjust = 0, face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.caption = element_text(hjust = 0),
+    legend.title = element_blank()
+  )
+
+leg <- ggpubr::get_legend(states)
+
+########
+
+dsn <- "
+##AA##
+BBCCDD
+"
+
+edr_plot <- wrap_plots(
+  # leg,
+  indias +
+    labs(title = "B.", x = "Nationwide", subtitle = "", caption = "") +
+    theme(legend.position = "none"),
+  states +
+    labs(title = "", x = "States", subtitle = "", caption = "") +
+    theme(
+      axis.text.y = element_blank(),
+      axis.title.y = element_blank(),
+      legend.position = "top"
+    ),
+  uts +
+    labs(title = "", x = "Union territories", subtitle = "", caption = "") +
+    theme(
+      axis.text.y = element_blank(),
+      axis.title.y = element_blank(),
+      legend.position = "none"
+    ),
+  # design = dsn,
+  widths = c(1, 25, 4)
+) +
+  plot_annotation(
+    # title = "Ratio of excess deaths to reported COVID deaths in India, 2021",
+    # caption = "Zoomed in on the y-axis [0, 10).",
+    theme = theme(
+      legend.position = "none",
+      plot.title = element_text(hjust = 0, face = "bold"),
+      plot.caption = element_text(hjust = 0, color = "gray30")
+    )
+  )
+
+edr_plot2019 <- wrap_plots(
+  # leg,
+  indias2019 +
+    labs(title = "B.", x = "Nationwide", subtitle = "", caption = "") +
+    theme(legend.position = "none"),
+  states2019 +
+    labs(title = "", x = "States", subtitle = "", caption = "") +
+    theme(
+      axis.text.y = element_blank(),
+      axis.title.y = element_blank(),
+      legend.position = "top"
+    ),
+  uts2019 +
     labs(title = "", x = "Union territories", subtitle = "", caption = "") +
     theme(
       axis.text.y = element_blank(),
@@ -538,6 +771,15 @@ ggsave(
 ggsave(
   filename = glue("{fig_path}excess_deaths_ratio_plot2021_2014_2019.pdf"),
   plot = deaths_over_edr_plot,
+  width = 10,
+  height = 10,
+  device = cairo_pdf
+)
+
+(deaths_over_edr_plot2019 <- deaths_plot / edr_plot2019)
+ggsave(
+  filename = glue("{fig_path}excess_deaths_ratio_plot2021_2019.pdf"),
+  plot = deaths_over_edr_plot2019,
   width = 10,
   height = 10,
   device = cairo_pdf
