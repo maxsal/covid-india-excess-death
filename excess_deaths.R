@@ -784,6 +784,15 @@ ggsave(
   height = 10,
   device = cairo_pdf
 )
+ggsave(
+  filename = glue("{fig_path}excess_deaths_ratio_plot2021_2019.tiff"),
+  plot = deaths_over_edr_plot2019,
+  width = 10,
+  height = 10,
+  units = "in",
+  dpi = 600,
+  device = "tiff"
+)
 
 # completeness of death record plot --------------------------------------------
 cord <- fread(glue("{raw_path}completeness/india_cord.csv"))
